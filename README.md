@@ -145,3 +145,5 @@ virtual-stock-platform/
 - **State is in-memory** — portfolio data resets when the server restarts. This is intentional for the MVP scope.
 - **No real money** — all trades use virtual cash starting at $100,000.
 - **Reproducible data** — the CSV is generated with a seeded PRNG (mulberry32, seed 42), so the same prices appear on every machine.
+
+<!-- Last updated for deployment -->
