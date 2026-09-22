@@ -1,0 +1,29 @@
+
+> solution-2-nextjs@0.1.0 dev
+> next dev -p 3002
+
+▲ Next.js 16.3.1 (Turbopack)
+- Local:         http://localhost:3002
+- Network:       http://10.115.64.16:3002
+✓ Ready in 3.9s
+✓ Running next.config.mjs took 61ms
+Turbopack build encountered 1 error:
+./app
+Error: Could not find the Next.js package (next/package.json)
+Resolved from: C:\Users\DELL\Documents\New Folder\solution-2-nextjs\app
+Filesystem root used for resolution: C:\Users\DELL\Documents\New Folder\solution-2-nextjs
+
+Possible causes:
+  - node_modules is being reorganized by a concurrent install (e.g. pnpm adding a package with a `next` peer dependency). This is transient and should clear once the install completes.
+  - node_modules/next was removed, renamed, or has a broken symlink.
+  - The workspace root is incorrect — see turbopack.root in the Next.js config docs for how to configure it.
+  - In a monorepo, the Next.js package may only exist in a directory above the closest directory containing a package manager lockfile. The workspace root is detected by locating the nearest package manager lockfile.
+  - Next.js is installed globally rather than as a project dependency. This is not supported; install it locally.
+
+Note: To ensure a hermetic build and a portable cache, files outside of the workspace root are not compiled.
+
+https://nextjs.org/docs/app/api-reference/config/next-config-js/turbopack#root-directory
+
+
+
+✓ Generated AGENTS.md and CLAUDE.md for AI agents. Set `agentRules: false` in next.config to disable.
