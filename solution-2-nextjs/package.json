@@ -1,18 +1,19 @@
 {
-  "name": "solution-2-nextjs",
-  "version": "0.1.0",
+  "name": "virtual-stock-platform",
+  "version": "1.0.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "node --test lib/portfolio.test.js"
   },
   "dependencies": {
     "next": "16.3.5",
     "react": "19.2.8",
-    "react-dom": "19.2.8",
-    "csv-parse": "^5.5.6"
+    "react-dom": "19.2.8"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

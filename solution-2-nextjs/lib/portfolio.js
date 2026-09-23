@@ -1,21 +1,24 @@
 /**
- * portfolio.js — module-level singleton owning all mutable trading state.
+ * portfolio.js — module-level state managing virtual portfolio holdings and trades.
  *
- * Module scope means Next.js API routes share the same object across requests
- * without a database. State resets on server restart (or hot-reload in dev).
- * This is intentional for the MVP — document it clearly.
+ * In-memory singleton stores executed transactions. State is dynamically reconstructed
+ * for any requested datetime T to ensure time-travel historical consistency:
+ * only trades placed at or before T affect the cash, holdings, and portfolio value at T.
  */
 
 import { getPrice, getKnownSymbols } from './market.js';
 
-const STARTING_CASH = 100_000;
+export const STARTING_CASH = 100_000;
 
-// ── Mutable singleton state ──────────────────────────────────────────────────
+// Internal transaction log: ordered oldest to newest.
+let transactions = [];
 
-// Ordered oldest-first; GET /api/transactions reverses before responding.
-const transactions = [];
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
+/**
+ * Resets portfolio state. Used by tests to ensure clean execution.
+ */
+export function resetPortfolio() {
+  transactions = [];
+}
 
 function nextTxnId() {
   const seq = String(transactions.length + 1).padStart(3, '0');
@@ -23,15 +26,14 @@ function nextTxnId() {
 }
 
 /**
- * Reconstructs portfolio state from transactions up to a given datetime.
- * This ensures time-travel is historically accurate: the portfolio at time T
- * reflects only trades executed at or before T, not all trades ever made.
+ * Reconstructs cash balance and holdings for any given timestamp T.
+ * Only processes transactions where tx.datetime <= T.
  */
-function getPortfolioStateAtTime(datetime) {
+export function getPortfolioStateAtTime(datetime) {
   let cash = STARTING_CASH;
   const holdings = {};
 
-  const relevantTransactions = transactions.filter(tx => tx.datetime <= datetime);
+  const relevantTransactions = transactions.filter((tx) => tx.datetime <= datetime);
 
   for (const tx of relevantTransactions) {
     const { symbol, action, quantity, total } = tx;
@@ -39,39 +41,37 @@ function getPortfolioStateAtTime(datetime) {
     if (action === 'buy') {
       cash = parseFloat((cash - total).toFixed(2));
       holdings[symbol] = (holdings[symbol] ?? 0) + quantity;
-    } else {
+    } else if (action === 'sell') {
       cash = parseFloat((cash + total).toFixed(2));
       holdings[symbol] = (holdings[symbol] ?? 0) - quantity;
-      if (holdings[symbol] === 0) delete holdings[symbol];
+      if (holdings[symbol] <= 0) {
+        delete holdings[symbol];
+      }
     }
   }
 
   return { cash, holdings };
 }
 
-// ── Public API ────────────────────────────────────────────────────────────────
-
 /**
  * Validates and executes a buy or sell order.
- * Throws { status, message } for validation errors so route handlers can
- * forward the correct HTTP status without coupling this module to Next.js.
+ * Throws an error object { status, message } for route handlers to return.
  */
 export function executeTrade(symbol, action, quantity, datetime) {
-  // Validate input types before business logic
-  if (typeof symbol !== 'string' || symbol.trim() === '') {
-    throw { status: 400, message: 'symbol must be a non-empty string' };
-  }
-
-  if (typeof datetime !== 'string' || !datetime.includes(' ')) {
-    throw { status: 400, message: 'datetime must be a string in format "YYYY-MM-DD HH:MM"' };
+  if (!symbol || typeof symbol !== 'string') {
+    throw { status: 400, message: 'symbol must be a valid non-empty string' };
   }
 
   if (action !== 'buy' && action !== 'sell') {
     throw { status: 400, message: `action must be "buy" or "sell", got "${action}"` };
   }
 
-  if (!Number.isInteger(quantity) || quantity <= 0) {
+  if (typeof quantity !== 'number' || !Number.isInteger(quantity) || quantity <= 0) {
     throw { status: 400, message: 'quantity must be a positive integer' };
+  }
+
+  if (!datetime || typeof datetime !== 'string' || !datetime.includes(' ')) {
+    throw { status: 400, message: 'datetime must be a valid string in "YYYY-MM-DD HH:MM" format' };
   }
 
   const knownSymbols = getKnownSymbols();
@@ -86,32 +86,29 @@ export function executeTrade(symbol, action, quantity, datetime) {
   if (price === null) {
     throw {
       status: 400,
-      message: `no data for ${symbol} at "${datetime}"; check that the datetime is within a trading session`,
+      message: `no market data for ${symbol} at "${datetime}"; ensure date and time are within market hours`,
     };
   }
 
-  // Prevent trading in the past relative to existing trades
-  const latestTradeTime = transactions.length > 0
-    ? transactions[transactions.length - 1].datetime
-    : null;
-
-  if (latestTradeTime && datetime < latestTradeTime) {
-    throw {
-      status: 400,
-      message: `cannot trade in the past: latest trade was at ${latestTradeTime}, requested ${datetime}`,
-    };
+  // Prevent backdating trades: Cannot place a trade earlier than the latest executed trade
+  if (transactions.length > 0) {
+    const latestTradeTime = transactions[transactions.length - 1].datetime;
+    if (datetime < latestTradeTime) {
+      throw {
+        status: 400,
+        message: `cannot place a trade in the past: latest trade was at ${latestTradeTime}, requested ${datetime}`,
+      };
+    }
   }
 
   const total = parseFloat((price * quantity).toFixed(2));
-
-  // Reconstruct state at this datetime to validate the trade
   const { cash, holdings } = getPortfolioStateAtTime(datetime);
 
   if (action === 'buy') {
     if (cash < total) {
       throw {
         status: 400,
-        message: `insufficient cash: need $${total.toFixed(2)}, have $${cash.toFixed(2)}`,
+        message: `insufficient cash: order requires $${total.toFixed(2)}, available cash is $${cash.toFixed(2)}`,
       };
     }
   } else {
@@ -119,7 +116,7 @@ export function executeTrade(symbol, action, quantity, datetime) {
     if (owned < quantity) {
       throw {
         status: 400,
-        message: `cannot sell ${quantity} shares of ${symbol}; you own ${owned}`,
+        message: `cannot sell ${quantity} shares of ${symbol}; you only hold ${owned} shares at this time`,
       };
     }
   }
@@ -137,15 +134,18 @@ export function executeTrade(symbol, action, quantity, datetime) {
 
   transactions.push(transaction);
 
-  const newState = getPortfolioStateAtTime(datetime);
-  return { transaction, newCash: newState.cash };
+  const updatedState = getPortfolioStateAtTime(datetime);
+  return { transaction, newCash: updatedState.cash };
 }
 
 /**
- * Returns a snapshot of the portfolio valued at the given datetime.
- * Only includes transactions executed at or before that time.
+ * Returns a complete portfolio snapshot valued at the given simulated datetime.
  */
 export function getPortfolioStatus(datetime) {
+  if (!datetime || typeof datetime !== 'string') {
+    throw { status: 400, message: 'datetime query parameter is required' };
+  }
+
   const { cash, holdings } = getPortfolioStateAtTime(datetime);
 
   const holdingsList = Object.entries(holdings)
@@ -159,20 +159,6 @@ export function getPortfolioStatus(datetime) {
 
   const holdingsMarketValue = holdingsList.reduce((sum, h) => sum + h.value, 0);
   const totalValue = parseFloat((cash + holdingsMarketValue).toFixed(2));
-
-  // Cost basis: what was paid net for currently held shares
-  const costBasis = Object.entries(holdings)
-    .filter(([, qty]) => qty > 0)
-    .reduce((sum, [symbol]) => {
-      const buys = transactions
-        .filter(tx => tx.symbol === symbol && tx.action === 'buy' && tx.datetime <= datetime)
-        .reduce((acc, tx) => acc + tx.total, 0);
-      const sells = transactions
-        .filter(tx => tx.symbol === symbol && tx.action === 'sell' && tx.datetime <= datetime)
-        .reduce((acc, tx) => acc + tx.total, 0);
-      return sum + Math.max(0, buys - sells);
-    }, 0);
-
   const profitLoss = parseFloat((totalValue - STARTING_CASH).toFixed(2));
   const profitLossPct = parseFloat(((profitLoss / STARTING_CASH) * 100).toFixed(2));
 
@@ -180,14 +166,13 @@ export function getPortfolioStatus(datetime) {
     cash,
     holdings: holdingsList,
     totalValue,
-    costBasis: parseFloat(costBasis.toFixed(2)),
     profitLoss,
     profitLossPct,
   };
 }
 
 /**
- * Returns the full transaction list, newest first.
+ * Returns all executed transactions in reverse chronological order (newest first).
  */
 export function getTransactions() {
   return [...transactions].reverse();

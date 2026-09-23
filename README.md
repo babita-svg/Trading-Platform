@@ -1,149 +1,159 @@
 # Virtual Stock Trading Platform
 
-A browser-based virtual stock trading simulator built as a full-stack portfolio project. Trade 10 real-world stocks across 12 historical trading days using virtual money — no real transactions, no authentication required.
-
-This repository contains **two independent implementations** of the same product, built to demonstrate different architectural approaches.
+A browser-based simulated stock market platform built with Next.js (App Router). Trade 10 real-world stocks across 12 simulated market days using virtual money — with deterministic market data, historical time-travel backtesting, dynamic portfolio tracking, and complete transaction logs.
 
 ---
 
-## Projects
+## Key Features
 
-| | Solution 1 | Solution 2 |
-|--|--|--|
-| **Stack** | React + Vite + Express | Next.js 14 (App Router) |
-| **Backend** | Express.js on port 3001 | Next.js API Routes (built-in) |
-| **Frontend** | Vite + React on port 5173 | Next.js on port 3000 |
-| **Run** | Two terminals | One terminal |
-| **Location** | `solution-1-express-react/` | `solution-2-nextjs/` |
-
----
-
-## Features
-
-- **Time-travel simulation** — Select any date and 30-minute interval across the trading period; prices and portfolio value update to reflect that moment.
-- **Buy & sell stocks** — Trade 10 major stocks (AAPL, MSFT, GOOGL, AMZN, TSLA, NVDA, META, NFLX, AMD, INTC) with $100,000 in virtual cash.
-- **Portfolio tracking** — See your current holdings, total value, and net profit/loss vs. your starting balance.
-- **Transaction history** — Full record of every trade placed in the session.
-- **No registration required** — Single predefined user, no login, no authentication.
+- **Time-Travel Simulation** — Select any historical trading day and 30-minute interval across the 12-day dataset (09:30 to 16:00 EST). All stock prices, portfolio value, and open holdings dynamically reconstruct to reflect that exact moment.
+- **Chronological Trade Integrity** — Backdating prevention ensures trades can only be placed at or after the timestamp of your latest executed trade.
+- **Virtual Trading** — Buy and sell 10 major US equities (AAPL, MSFT, GOOGL, AMZN, TSLA, NVDA, META, NFLX, AMD, INTC) starting with $100,000 in virtual cash.
+- **Dynamic Portfolio & P&L** — Instant calculation of cash balance, open positions, total portfolio market value, and net profit/loss ($ and %).
+- **Simulated Day Change Indicators** — Real-time price movement percentage displayed against the day's market open (09:30 EST).
+- **Session Transaction History** — Comprehensive audit log of every buy and sell order executed in the session.
+- **Zero Real Money & Zero Auth** — Designed strictly as a single-user simulation environment; no login or payment credentials needed.
 
 ---
 
-## Getting Started
+## Technology Stack
+
+- **Framework:** Next.js 16 (App Router)
+- **UI & Components:** React 19, Tailwind CSS v4
+- **Runtime:** Node.js 20.9+ (ES Modules)
+- **Testing:** Node.js native test runner (`node --test`)
+- **Data:** In-memory dataset parsed via Node built-in file streams (zero external CSV parsing dependencies)
+
+---
+
+## Quick Start
 
 ### Prerequisites
 
-- Node.js 20.9 or later
+- Node.js **20.9** or later
 - npm 9 or later
 
-### Solution 1 — React + Express
+### Running the Application
 
 ```bash
-# Terminal 1: Start the backend API
-cd solution-1-express-react/backend
-npm install
-npm start
-# Backend running at http://localhost:3001
-```
+# 1. Navigate to the Next.js project directory
+cd solution-2-nextjs
 
-```bash
-# Terminal 2: Start the React frontend
-cd solution-1-express-react/frontend
+# 2. Install dependencies
 npm install
+
+# 3. Start development server
 npm run dev
-# Frontend running at http://localhost:5173
 ```
 
-Open [http://localhost:5173](http://localhost:5173) in your browser.
+Open **[http://localhost:3000](http://localhost:3000)** in your browser.
 
-### Solution 2 — Next.js
+### Running Automated Tests
+
+The application includes a suite of 12 unit tests validating all core trade execution, validation rules, time-travel portfolio reconstruction, and P&L calculations:
 
 ```bash
 cd solution-2-nextjs
-npm install
-npm run dev
-# App running at http://localhost:3000
+npm test
 ```
-
-Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ---
 
-## Market Data
+## Architecture & Design Decisions
 
-Both solutions share a single CSV file at `data/market_data.csv`:
+### Why Next.js App Router & API Routes?
+Next.js provides a unified full-stack architecture where React Client Components communicate with server-side API Routes (`app/api/*`) within the same deployment unit. This eliminates the need for separate backend infrastructure, CORS configuration, or multiple terminal windows during local evaluation.
 
-- **10 stocks** — AAPL, MSFT, GOOGL, AMZN, TSLA, NVDA, META, NFLX, AMD, INTC
-- **12 simulated market days** — 2024-01-15 to 2024-01-30 (weekends excluded)
-- **14 intervals/day** — 09:30 to 16:00 in 30-minute steps
-- **1,680 total price points** — generated with a seeded random walk for reproducibility
+### Why In-Memory State?
+Per assignment guidelines, the application targets a single predefined user for MVP demonstration. An in-memory singleton manages trading state without introducing external database dependencies (PostgreSQL, SQLite, Redis), ensuring zero-configuration evaluation and lightning-fast state operations.
 
-To regenerate the CSV:
+### Historical Portfolio Reconstruction (Time-Travel)
+When a user selects simulated timestamp $T$:
+1. The system filters the transaction log for orders where $\text{datetime} \le T$.
+2. Cash balance and share holdings are deterministically replayed up to $T$.
+3. Total portfolio market value is computed using the stock prices at timestamp $T$.
+4. Net Profit/Loss is calculated against the initial $\$100,000$ base.
+
+> **Note on State Persistence:** As this is an in-memory simulation, trading state is maintained for the lifecycle of the server process and resets upon server restart.
+
+---
+
+## Market Data Specifications
+
+The dataset represents simulated trading for 10 liquid stocks over 12 consecutive business weekdays (excluding weekends):
+
+- **Date Range:** 2024-01-15 through 2024-01-30 (12 weekdays)
+- **Trading Hours:** 09:30 to 16:00 EST in 30-minute steps (14 intervals/day)
+- **Total Data Points:** $10 \text{ stocks} \times 12 \text{ days} \times 14 \text{ intervals} = 1,680 \text{ price rows}$
+- **Deterministic Generation:** Generated using a seeded `mulberry32` PRNG (seed 42) and geometric random walk with realistic volatility. Output is 100% reproducible.
+
+### Regenerating Market Data
 
 ```bash
 node data/generate_market_data.js
 ```
 
----
-
-## API Reference (Solution 1 / Solution 2 share the same contract)
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/market/range` | Available date/time range and trading days |
-| `GET` | `/api/stocks?datetime=YYYY-MM-DD HH:MM` | All stock prices at a given time |
-| `GET` | `/api/portfolio?datetime=YYYY-MM-DD HH:MM` | Portfolio value and holdings at a given time |
-| `POST` | `/api/trade` | Execute a buy or sell order |
-| `GET` | `/api/transactions` | Full transaction history (newest first) |
+This single command updates both the root dataset and the application dataset simultaneously.
 
 ---
 
-## Architecture Decision
+## API Reference
 
-**Why two implementations?**
+All endpoints return standard JSON responses and structured error messages with appropriate HTTP status codes.
 
-Solution 1 demonstrates a **decoupled architecture**: a standalone Express API and a Vite React frontend that communicate over HTTP. This is the most common pattern in production — separate teams, separate deployments, clear API boundaries.
+| Method | Endpoint | Description | Query / Body Params |
+|---|---|---|---|
+| `GET` | `/api/market/range` | Available date range and trading days | None |
+| `GET` | `/api/stocks` | All stock prices and day change at given time | `datetime=YYYY-MM-DD HH:MM` |
+| `GET` | `/api/portfolio` | Reconstructed portfolio and P&L at given time | `datetime=YYYY-MM-DD HH:MM` |
+| `POST` | `/api/trade` | Execute a buy or sell order | `{"symbol", "action", "quantity", "datetime"}` |
+| `GET` | `/api/transactions` | Full session trade audit log (newest first) | None |
 
-Solution 2 demonstrates a **Next.js monolith**: the API and the UI live in the same project. There is no separate backend process; API Routes in `app/api/` handle requests server-side, and React Client Components fetch from them. This reduces operational overhead (one process, one `npm run dev`) at the cost of tighter coupling.
-
-Both share identical API contracts and business logic. The in-memory portfolio state resets on server restart in both — acceptable for an MVP without a persistent database.
+### Trade Validation Rules
+The `/api/trade` endpoint strictly validates:
+- `action` is `"buy"` or `"sell"`.
+- `quantity` is a positive integer.
+- `symbol` is one of the 10 supported tickers.
+- `datetime` maps to an existing simulated market slot.
+- `buy` checks available virtual cash $\ge \text{quantity} \times \text{price}$.
+- `sell` checks owned shares $\ge \text{quantity}$.
+- Backdated orders ($\text{datetime} < \text{latest trade time}$) are rejected with `400 Bad Request`.
 
 ---
 
 ## Project Structure
 
 ```
-virtual-stock-platform/
+Trading-Platform/
+├── .github/
+│   └── workflows/
+│       └── ci.yml               # Automated CI pipeline (lint, test, build)
 ├── data/
-│   ├── generate_market_data.js   # CSV generation script (seeded PRNG)
-│   └── market_data.csv           # 1,680 rows of simulated prices
-├── solution-1-express-react/
-│   ├── backend/
-│   │   └── src/
-│   │       ├── data/market.js        # CSV loader + price lookup
-│   │       ├── services/portfolio.js # Trade logic + state
-│   │       ├── routes/api.js         # Express route handlers
-│   │       └── index.js              # Server entry point
-│   └── frontend/
-│       └── src/
-│           ├── api/client.js         # Centralised fetch helpers
-│           ├── components/           # TimeSelector, MarketTable, TradeModal, PortfolioSummary
-│           └── App.jsx               # Root component + global state
-└── solution-2-nextjs/
-    ├── app/
-    │   ├── api/                      # Next.js API route handlers
-    │   └── page.js                   # Dashboard page (client component)
-    ├── components/                   # Shared UI components
-    └── lib/
-        ├── market.js                 # CSV loader + price lookup
-        └── portfolio.js              # Trade logic + state singleton
+│   ├── generate_market_data.js  # Deterministic PRNG data generator
+│   └── market_data.csv          # 1,680 rows of simulated market prices
+├── solution-2-nextjs/
+│   ├── app/
+│   │   ├── api/                 # Next.js API route handlers
+│   │   │   ├── market/range/    # Available range endpoint
+│   │   │   ├── portfolio/       # Historical portfolio endpoint
+│   │   │   ├── stocks/          # Stock price & day change endpoint
+│   │   │   ├── trade/           # Trade execution & validation endpoint
+│   │   │   └── transactions/    # Audit log endpoint
+│   │   ├── globals.css          # Tailwind CSS styles
+│   │   ├── layout.js            # Root HTML layout & font setup
+│   │   └── page.js              # Main trading dashboard page
+│   ├── components/
+│   │   ├── MarketTable.jsx      # Stock list with prices & buy/sell actions
+│   │   ├── PortfolioSummary.jsx # Cash, total value, P&L & holdings
+│   │   ├── TimeSelector.jsx     # Simulated market timestamp picker
+│   │   └── TradeModal.jsx       # Order configuration & validation modal
+│   ├── data/
+│   │   └── market_data.csv      # Application market dataset
+│   ├── lib/
+│   │   ├── market.js            # O(1) CSV memory lookup loader
+│   │   ├── portfolio.js         # In-memory trade execution & time-travel logic
+│   │   └── portfolio.test.js    # 12 automated unit tests (node:test)
+│   ├── package.json             # Scripts & dependency definitions
+│   └── next.config.mjs          # Next.js build configuration
+└── README.md                    # Project documentation & evaluation guide
 ```
-
----
-
-## Notes
-
-- **State is in-memory** — portfolio data resets when the server restarts. This is intentional for the MVP scope.
-- **No real money** — all trades use virtual cash starting at $100,000.
-- **Reproducible data** — the CSV is generated with a seeded PRNG (mulberry32, seed 42), so the same prices appear on every machine.
-
-<!-- Last updated for deployment -->

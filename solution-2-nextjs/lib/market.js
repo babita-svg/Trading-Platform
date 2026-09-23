@@ -1,23 +1,21 @@
 /**
- * market.js — loads the shared CSV once at startup into a fast lookup map.
+ * market.js — loads the CSV dataset once into an in-memory lookup map.
  *
- * In Next.js, this module is imported by API route handlers. The module-level
- * singleton means the data is parsed once per process and shared across all
- * requests. During `next dev`, hot-reload may reset the state — this is
- * expected and documented.
- *
- * Key design: composite string key "SYMBOL|YYYY-MM-DD|HH:MM" for O(1) lookups.
+ * Uses Node's built-in file system to parse standard CSV rows without third-party dependencies.
+ * Composite string key "SYMBOL|YYYY-MM-DD|HH:MM" provides O(1) price lookups.
  */
 
-import { createReadStream } from 'fs';
-import { resolve, join } from 'path';
-import { parse } from 'csv-parse';
+import { readFileSync, existsSync } from 'fs';
+import { resolve } from 'path';
 
-// Safe resolution for deployment to Vercel/Next.js hosting:
-// Rely on process.cwd() pointing to solution-2-nextjs root, where we now keep a local copy
-const CSV_PATH = resolve(process.cwd(), 'data', 'market_data.csv');
+function resolveCsvPath() {
+  const localPath = resolve(process.cwd(), 'data', 'market_data.csv');
+  if (existsSync(localPath)) return localPath;
+  const parentPath = resolve(process.cwd(), '..', 'data', 'market_data.csv');
+  if (existsSync(parentPath)) return parentPath;
+  return localPath;
+}
 
-// The 10 known stocks with human-readable names.
 const STOCK_NAMES = {
   AAPL: 'Apple Inc.',
   MSFT: 'Microsoft Corp.',
@@ -31,75 +29,77 @@ const STOCK_NAMES = {
   INTC: 'Intel Corp.',
 };
 
-// priceMap: "SYMBOL|YYYY-MM-DD|HH:MM" → price (number)
 let priceMap = new Map();
-
-// Sorted unique dates present in the CSV.
 let tradingDays = [];
-
-// Earliest and latest datetime strings in the data.
 let rangeStart = null;
 let rangeEnd = null;
+let loaded = false;
 
-// Track whether loading has started so we only parse once.
-let loadPromise = null;
-
-/**
- * Parses the CSV once. Subsequent calls return the same promise.
- */
 export function loadMarketData() {
-  if (loadPromise) return loadPromise;
+  if (loaded) return Promise.resolve();
 
-  loadPromise = new Promise((res, rej) => {
+  try {
+    const csvPath = resolveCsvPath();
+    const content = readFileSync(csvPath, 'utf8');
+    const lines = content.split(/\r?\n/).filter((line) => line.trim().length > 0);
+
     const daySet = new Set();
 
-    createReadStream(CSV_PATH)
-      .pipe(parse({ columns: true, trim: true }))
-      .on('data', (row) => {
-        const key = `${row.symbol}|${row.date}|${row.time}`;
-        priceMap.set(key, parseFloat(row.price));
-        daySet.add(row.date);
-      })
-      .on('end', () => {
-        tradingDays = [...daySet].sort();
-        rangeStart = `${tradingDays[0]} 09:30`;
-        rangeEnd = `${tradingDays[tradingDays.length - 1]} 16:00`;
-        res();
-      })
-      .on('error', rej);
-  });
+    // Skip header line at index 0: symbol,date,time,price
+    for (let i = 1; i < lines.length; i++) {
+      const parts = lines[i].split(',').map((p) => p.trim());
+      if (parts.length >= 4) {
+        const [symbol, date, time, priceStr] = parts;
+        const price = parseFloat(priceStr);
+        if (!isNaN(price)) {
+          const key = `${symbol}|${date}|${time}`;
+          priceMap.set(key, price);
+          daySet.add(date);
+        }
+      }
+    }
 
-  return loadPromise;
+    tradingDays = [...daySet].sort();
+    if (tradingDays.length > 0) {
+      rangeStart = `${tradingDays[0]} 09:30`;
+      rangeEnd = `${tradingDays[tradingDays.length - 1]} 16:00`;
+    }
+
+    loaded = true;
+    return Promise.resolve();
+  } catch (err) {
+    return Promise.reject(err);
+  }
 }
 
-/**
- * Returns the price for a symbol at a datetime string ("YYYY-MM-DD HH:MM"),
- * or null when the data point doesn't exist.
- */
 export function getPrice(symbol, datetime) {
+  if (!datetime || typeof datetime !== 'string' || !datetime.includes(' ')) {
+    return null;
+  }
   const [date, time] = datetime.split(' ');
   const key = `${symbol}|${date}|${time}`;
   const price = priceMap.get(key);
   return price !== undefined ? price : null;
 }
 
-/**
- * Returns market range metadata for GET /api/market/range.
- */
+export function getOpenPrice(symbol, datetime) {
+  if (!datetime || typeof datetime !== 'string' || !datetime.includes(' ')) {
+    return null;
+  }
+  const [date] = datetime.split(' ');
+  const key = `${symbol}|${date}|09:30`;
+  const price = priceMap.get(key);
+  return price !== undefined ? price : null;
+}
+
 export function getMarketRange() {
   return { start: rangeStart, end: rangeEnd, tradingDays };
 }
 
-/**
- * Returns all known symbol strings.
- */
 export function getKnownSymbols() {
   return Object.keys(STOCK_NAMES);
 }
 
-/**
- * Returns the human-readable name for a symbol, or null if unknown.
- */
 export function getStockName(symbol) {
   return STOCK_NAMES[symbol] ?? null;
 }
