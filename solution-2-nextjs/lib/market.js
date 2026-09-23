@@ -13,8 +13,9 @@ import { createReadStream } from 'fs';
 import { resolve, join } from 'path';
 import { parse } from 'csv-parse';
 
-// Navigate from solution-2-nextjs/lib/ up to repo root, then into shared data folder.
-const CSV_PATH = resolve(process.cwd(), '..', 'data', 'market_data.csv');
+// Safe resolution for deployment to Vercel/Next.js hosting:
+// Rely on process.cwd() pointing to solution-2-nextjs root, where we now keep a local copy
+const CSV_PATH = resolve(process.cwd(), 'data', 'market_data.csv');
 
 // The 10 known stocks with human-readable names.
 const STOCK_NAMES = {

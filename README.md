@@ -32,7 +32,7 @@ This repository contains **two independent implementations** of the same product
 
 ### Prerequisites
 
-- Node.js 18 or later
+- Node.js 20.9 or later
 - npm 9 or later
 
 ### Solution 1 — React + Express
@@ -73,7 +73,7 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 Both solutions share a single CSV file at `data/market_data.csv`:
 
 - **10 stocks** — AAPL, MSFT, GOOGL, AMZN, TSLA, NVDA, META, NFLX, AMD, INTC
-- **12 trading days** — 2024-01-15 to 2024-01-30 (weekends excluded)
+- **12 simulated market days** — 2024-01-15 to 2024-01-30 (weekends excluded)
 - **14 intervals/day** — 09:30 to 16:00 in 30-minute steps
 - **1,680 total price points** — generated with a seeded random walk for reproducibility
 

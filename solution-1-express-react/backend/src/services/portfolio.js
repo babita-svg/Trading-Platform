@@ -1,23 +1,15 @@
 /**
- * portfolio.js — module-level singleton that owns all mutable trading state.
+ * portfolio.js — module-level singleton owning all mutable trading state.
  *
- * Keeping state at module scope means Express routes share the same object
- * across requests without needing a database or external cache.  The trade-off
- * is that the state resets on server restart, which is acceptable for an MVP.
+ * Module scope means Express routes share the same object across requests
+ * without a database. State resets on server restart (acceptable for MVP).
  */
 
 import { getPrice, getKnownSymbols } from '../data/market.js';
 
-// Starting balance matches the product spec.  Defined here rather than
-// imported from the generator so this module has no cross-solution coupling.
 const STARTING_CASH = 100_000;
 
 // ── Mutable state ──────────────────────────────────────────────────────────
-
-let cash = STARTING_CASH;
-
-// { [symbol]: quantity }  — symbols absent from the object mean zero holdings.
-const holdings = {};
 
 // Ordered oldest-first internally; the GET /api/transactions route reverses
 // before responding so callers always receive newest-first.
@@ -25,13 +17,37 @@ const transactions = [];
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-/**
- * Generates a zero-padded transaction ID like "txn_001".
- * Simple sequence is fine for an in-memory store with no persistence.
- */
 function nextTxnId() {
   const seq = String(transactions.length + 1).padStart(3, '0');
   return `txn_${seq}`;
+}
+
+/**
+ * Reconstructs portfolio state from transactions up to a given datetime.
+ * This ensures time-travel works correctly: the portfolio at time T shows
+ * only the effects of trades executed at or before T.
+ */
+function getPortfolioStateAtTime(datetime) {
+  let cash = STARTING_CASH;
+  const holdings = {};
+
+  // Filter transactions to only those executed at or before the given datetime
+  const relevantTransactions = transactions.filter(tx => tx.datetime <= datetime);
+
+  for (const tx of relevantTransactions) {
+    const { symbol, action, quantity, total } = tx;
+
+    if (action === 'buy') {
+      cash = parseFloat((cash - total).toFixed(2));
+      holdings[symbol] = (holdings[symbol] ?? 0) + quantity;
+    } else {
+      cash = parseFloat((cash + total).toFixed(2));
+      holdings[symbol] = (holdings[symbol] ?? 0) - quantity;
+      if (holdings[symbol] === 0) delete holdings[symbol];
+    }
+  }
+
+  return { cash, holdings };
 }
 
 // ── Public API ─────────────────────────────────────────────────────────────
@@ -41,15 +57,16 @@ function nextTxnId() {
  *
  * Throws an object { status, message } so the route layer can forward the
  * right HTTP status code without coupling this function to Express.
- *
- * @param {string} symbol
- * @param {'buy'|'sell'} action
- * @param {number} quantity  — must be a positive integer
- * @param {string} datetime  — "YYYY-MM-DD HH:MM"
- * @returns {object} { transaction, newCash }
  */
 export function executeTrade(symbol, action, quantity, datetime) {
-  // ── Input validation (order matters: cheapest checks first) ──────────────
+  // Validate input types first
+  if (typeof symbol !== 'string' || symbol.trim() === '') {
+    throw { status: 400, message: 'symbol must be a non-empty string' };
+  }
+
+  if (typeof datetime !== 'string' || !datetime.includes(' ')) {
+    throw { status: 400, message: 'datetime must be a string in format "YYYY-MM-DD HH:MM"' };
+  }
 
   if (action !== 'buy' && action !== 'sell') {
     throw { status: 400, message: `action must be "buy" or "sell", got "${action}"` };
@@ -75,9 +92,22 @@ export function executeTrade(symbol, action, quantity, datetime) {
     };
   }
 
+  // Check if trying to trade in the past relative to existing trades
+  const latestTradeTime = transactions.length > 0
+    ? transactions[transactions.length - 1].datetime
+    : null;
+
+  if (latestTradeTime && datetime < latestTradeTime) {
+    throw {
+      status: 400,
+      message: `cannot trade in the past: latest trade was at ${latestTradeTime}, requested ${datetime}`
+    };
+  }
+
   const total = parseFloat((price * quantity).toFixed(2));
 
-  // ── Business-rule validation ──────────────────────────────────────────────
+  // Get current state at the trading datetime to validate the trade
+  const { cash, holdings } = getPortfolioStateAtTime(datetime);
 
   if (action === 'buy') {
     if (cash < total) {
@@ -86,10 +116,7 @@ export function executeTrade(symbol, action, quantity, datetime) {
         message: `insufficient cash: need $${total.toFixed(2)}, have $${cash.toFixed(2)}`,
       };
     }
-    cash = parseFloat((cash - total).toFixed(2));
-    holdings[symbol] = (holdings[symbol] ?? 0) + quantity;
   } else {
-    // sell
     const owned = holdings[symbol] ?? 0;
     if (owned < quantity) {
       throw {
@@ -97,11 +124,6 @@ export function executeTrade(symbol, action, quantity, datetime) {
         message: `cannot sell ${quantity} shares of ${symbol}; you own ${owned}`,
       };
     }
-    cash = parseFloat((cash + total).toFixed(2));
-    holdings[symbol] = owned - quantity;
-    // Remove the key entirely when the position is closed so the holdings
-    // object doesn't accumulate zero-quantity entries.
-    if (holdings[symbol] === 0) delete holdings[symbol];
   }
 
   const transaction = {
@@ -117,34 +139,41 @@ export function executeTrade(symbol, action, quantity, datetime) {
 
   transactions.push(transaction);
 
-  return { transaction, newCash: cash };
+  // Return the new cash balance after this trade
+  const newState = getPortfolioStateAtTime(datetime);
+  return { transaction, newCash: newState.cash };
 }
 
 /**
  * Returns a snapshot of the portfolio valued at the given datetime.
- *
- * @param {string} datetime  — "YYYY-MM-DD HH:MM"
- * @returns {object}
+ * Only includes transactions executed at or before that time.
  */
 export function getPortfolioStatus(datetime) {
+  const { cash, holdings } = getPortfolioStateAtTime(datetime);
+
   const holdingsList = Object.entries(holdings)
     .filter(([, qty]) => qty > 0)
     .map(([symbol, quantity]) => {
       const currentPrice = getPrice(symbol, datetime);
-      // currentPrice may be null if a bad datetime is passed — the route layer
-      // validates datetime before calling here, so null is unexpected but we
-      // handle it gracefully to avoid NaN in calculations.
-      const value =
-        currentPrice !== null ? parseFloat((quantity * currentPrice).toFixed(2)) : 0;
+      const value = currentPrice !== null ? parseFloat((quantity * currentPrice).toFixed(2)) : 0;
       return { symbol, quantity, currentPrice, value };
     });
 
   const holdingsMarketValue = holdingsList.reduce((sum, h) => sum + h.value, 0);
   const totalValue = parseFloat((cash + holdingsMarketValue).toFixed(2));
 
-  // totalInvested represents how much of the starting cash has been deployed,
-  // not how much was paid for current holdings (i.e. it ignores sell proceeds).
-  const totalInvested = parseFloat((STARTING_CASH - cash).toFixed(2));
+  // Calculate cost basis of current holdings, not total deployed capital
+  const costBasis = Object.entries(holdings)
+    .filter(([, qty]) => qty > 0)
+    .reduce((sum, [symbol, quantity]) => {
+      const buys = transactions
+        .filter(tx => tx.symbol === symbol && tx.action === 'buy' && tx.datetime <= datetime)
+        .reduce((total, tx) => total + tx.total, 0);
+      const sells = transactions
+        .filter(tx => tx.symbol === symbol && tx.action === 'sell' && tx.datetime <= datetime)
+        .reduce((total, tx) => total + tx.total, 0);
+      return sum + Math.max(0, buys - sells);
+    }, 0);
 
   const profitLoss = parseFloat((totalValue - STARTING_CASH).toFixed(2));
   const profitLossPct = parseFloat(((profitLoss / STARTING_CASH) * 100).toFixed(2));
@@ -153,7 +182,7 @@ export function getPortfolioStatus(datetime) {
     cash,
     holdings: holdingsList,
     totalValue,
-    totalInvested,
+    costBasis: parseFloat(costBasis.toFixed(2)),
     profitLoss,
     profitLossPct,
   };
