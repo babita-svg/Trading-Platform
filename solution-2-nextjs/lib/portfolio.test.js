@@ -1,10 +1,9 @@
 import { test, describe, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { loadMarketData } from './market.js';
+import { loadMarketData, getPrice } from './market.js';
 import {
   executeTrade,
   getPortfolioStatus,
-  getPortfolioStateAtTime,
   getTransactions,
   resetPortfolio,
   STARTING_CASH,
@@ -91,7 +90,7 @@ describe('Portfolio & Trade Business Logic', async () => {
   });
 
   test('9. historical portfolio time-travel reconstruction', () => {
-    // Buy on Jan 15, then buy on Jan 20
+    // Buy on Jan 15, then buy on Jan 22
     executeTrade('AAPL', 'buy', 10, '2024-01-15 09:30');
     executeTrade('MSFT', 'buy', 5, '2024-01-22 09:30');
 
@@ -115,14 +114,25 @@ describe('Portfolio & Trade Business Logic', async () => {
     );
   });
 
-  test('11. profit and loss calculation accurately reflects market value', () => {
-    executeTrade('AAPL', 'buy', 10, '2024-01-15 09:30');
-    const status = getPortfolioStatus('2024-01-15 09:30');
+  test('11. profit and loss calculation accurately reflects price movement over time', () => {
+    const buyPrice = getPrice('AAPL', '2024-01-15 09:30'); // 184.66
+    const laterPrice = getPrice('AAPL', '2024-01-15 10:00'); // 183.64 (price dropped)
+    const quantity = 100;
 
-    assert.equal(typeof status.profitLoss, 'number');
-    assert.equal(typeof status.profitLossPct, 'number');
-    assert.equal(status.totalValue, parseFloat((status.cash + status.holdings[0].value).toFixed(2)));
-    assert.equal(status.profitLoss, parseFloat((status.totalValue - STARTING_CASH).toFixed(2)));
+    executeTrade('AAPL', 'buy', quantity, '2024-01-15 09:30');
+
+    // At buy time, P&L is 0
+    const initialStatus = getPortfolioStatus('2024-01-15 09:30');
+    assert.equal(initialStatus.profitLoss, 0);
+    assert.equal(initialStatus.totalValue, STARTING_CASH);
+
+    // Later at 10:00, price dropped from 184.66 to 183.64 (-$1.02 per share)
+    const expectedLoss = parseFloat(((laterPrice - buyPrice) * quantity).toFixed(2));
+    const laterStatus = getPortfolioStatus('2024-01-15 10:00');
+
+    assert.equal(laterStatus.profitLoss, expectedLoss);
+    assert.ok(laterStatus.profitLoss < 0);
+    assert.equal(laterStatus.totalValue, parseFloat((STARTING_CASH + expectedLoss).toFixed(2)));
   });
 
   test('12. transaction ordering returns newest first', () => {

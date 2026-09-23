@@ -1,16 +1,14 @@
 /**
  * generate_market_data.js — generates deterministic dummy market data for 10 stocks.
  *
- * Uses a seeded mulberry32 PRNG (seed 42) so output is 100% reproducible across environments.
+ * Written as CommonJS for universal Node.js execution across all environments and directories.
+ * Uses a seeded mulberry32 PRNG (seed 42) so output is 100% reproducible.
  * Generates 10 stocks x 12 simulated weekdays x 14 intervals (30-min steps from 09:30 to 16:00)
  * = exactly 1,680 data rows.
  */
 
-import { writeFileSync, mkdirSync, existsSync } from 'fs';
-import { resolve, dirname } from 'path';
-import { fileURLToPath } from 'url';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
+const fs = require('fs');
+const path = require('path');
 
 const PRNG_SEED = 42;
 
@@ -78,7 +76,7 @@ function generateIntervals() {
   return intervals;
 }
 
-export function generateCSV() {
+function generateCSV() {
   const dates = generateSimulatedDates();
   const intervals = generateIntervals();
   const rows = ['symbol,date,time,price'];
@@ -102,18 +100,18 @@ export function generateCSV() {
 
 function main() {
   const csvContent = generateCSV();
-  const rootCsvPath = resolve(__dirname, 'market_data.csv');
-  const solutionCsvPath = resolve(__dirname, '..', 'solution-2-nextjs', 'data', 'market_data.csv');
+  const rootCsvPath = path.resolve(__dirname, 'market_data.csv');
+  const solutionCsvPath = path.resolve(__dirname, '..', 'solution-2-nextjs', 'data', 'market_data.csv');
 
   try {
-    writeFileSync(rootCsvPath, csvContent, 'utf8');
+    fs.writeFileSync(rootCsvPath, csvContent, 'utf8');
     console.log(`Generated root CSV: ${rootCsvPath}`);
 
-    const solutionDataDir = dirname(solutionCsvPath);
-    if (!existsSync(solutionDataDir)) {
-      mkdirSync(solutionDataDir, { recursive: true });
+    const solutionDataDir = path.dirname(solutionCsvPath);
+    if (!fs.existsSync(solutionDataDir)) {
+      fs.mkdirSync(solutionDataDir, { recursive: true });
     }
-    writeFileSync(solutionCsvPath, csvContent, 'utf8');
+    fs.writeFileSync(solutionCsvPath, csvContent, 'utf8');
     console.log(`Generated Next.js CSV: ${solutionCsvPath}`);
 
     console.log(`Summary: 10 stocks, 12 days, 14 intervals/day = 1,680 data points.`);
@@ -123,4 +121,8 @@ function main() {
   }
 }
 
-main();
+if (require.main === module) {
+  main();
+}
+
+module.exports = { generateCSV };

@@ -24,6 +24,10 @@ jobs:
         working-directory: ./solution-2-nextjs
         run: npm install
 
+      - name: Run linter
+        working-directory: ./solution-2-nextjs
+        run: npm run lint
+
       - name: Run unit test suite
         working-directory: ./solution-2-nextjs
         run: npm test
